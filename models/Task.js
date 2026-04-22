@@ -1,19 +1,26 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 
-const taskSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  description: { type: String, required: true },
-  type: { 
-    type: String, 
-    enum: ['channel', 'daily', 'one-time'], 
-    default: 'channel' 
+const Task = sequelize.define('Task', {
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true
   },
-  channelLink: { type: String, default: '' },
-  channelId: { type: String, default: '' },
-  reward: { type: Number, required: true },
-  isActive: { type: Boolean, default: true },
-  order: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now }
+  title: { type: DataTypes.STRING, allowNull: false },
+  description: { type: DataTypes.STRING, allowNull: false },
+  type: {
+    type: DataTypes.ENUM('channel', 'daily', 'one-time'),
+    defaultValue: 'channel'
+  },
+  channelLink: { type: DataTypes.STRING, defaultValue: '' },
+  channelId: { type: DataTypes.STRING, defaultValue: '' },
+  reward: { type: DataTypes.FLOAT, allowNull: false },
+  isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
+  order: { type: DataTypes.INTEGER, defaultValue: 0 }
+}, {
+  tableName: 'tasks',
+  timestamps: true
 });
 
-module.exports = mongoose.model('Task', taskSchema);
+module.exports = Task;

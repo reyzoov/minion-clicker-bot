@@ -2,9 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const connectDB = require('./config/database');
+const { connectDB } = require('./config/database');
 
-// Подключение к MongoDB
+// Подключение к PostgreSQL
 connectDB();
 
 const app = express();

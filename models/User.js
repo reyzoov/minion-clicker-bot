@@ -1,74 +1,84 @@
-const mongoose = require('mongoose');
-const constants = require('../config/constants');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 
-const userSchema = new mongoose.Schema({
-  telegramId: { type: String, required: true, unique: true },
-  username: { type: String, default: '' },
-  firstName: { type: String, default: '' },
-  lastName: { type: String, default: '' },
-  photoUrl: { type: String, default: '' },
+const User = sequelize.define('User', {
+  telegramId: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
+    primaryKey: true
+  },
+  username: { type: DataTypes.STRING, defaultValue: '' },
+  firstName: { type: DataTypes.STRING, defaultValue: '' },
+  lastName: { type: DataTypes.STRING, defaultValue: '' },
+  photoUrl: { type: DataTypes.STRING, defaultValue: '' },
   
-  // Баланс и прогресс
-  bananas: { type: Number, default: 0 },
-  totalEarned: { type: Number, default: 0 },
-  level: { type: Number, default: 1 },
-  prestige: { type: Number, default: 0 },
+  // Баланс
+  bananas: { type: DataTypes.FLOAT, defaultValue: 0 },
+  totalEarned: { type: DataTypes.FLOAT, defaultValue: 0 },
+  level: { type: DataTypes.INTEGER, defaultValue: 1 },
+  prestige: { type: DataTypes.INTEGER, defaultValue: 0 },
   
   // Энергия
-  energy: { type: Number, default: constants.MAX_ENERGY },
-  maxEnergy: { type: Number, default: constants.MAX_ENERGY },
-  lastEnergyUpdate: { type: Date, default: Date.now },
+  energy: { type: DataTypes.FLOAT, defaultValue: 500 },
+  maxEnergy: { type: DataTypes.FLOAT, defaultValue: 500 },
+  lastEnergyUpdate: { type: DataTypes.DATE, defaultValue: Date.now },
   
-  // Улучшения (уровни 0-10)
+  // Улучшения (храним как JSON)
   upgrades: {
-    clickPower: { type: Number, default: 0 },
-    autoClicker: { type: Number, default: 0 },
-    energy: { type: Number, default: 0 },
-    energyRegen: { type: Number, default: 0 },
-    critical: { type: Number, default: 0 },
-    bananaFarm: { type: Number, default: 0 },
-    minionHelper: { type: Number, default: 0 }
+    type: DataTypes.JSONB,
+    defaultValue: {
+      clickPower: 0,
+      autoClicker: 0,
+      energy: 0,
+      energyRegen: 0,
+      critical: 0,
+      bananaFarm: 0,
+      minionHelper: 0
+    }
   },
   
-  // Карточки улучшений
-  cards: { type: Map, of: Number, default: {} },
+  // Карточки (храним как JSON)
+  cards: { type: DataTypes.JSONB, defaultValue: {} },
   
   // Рефералы
-  referralCode: { type: String, unique: true, sparse: true },
-  referredBy: { type: String, default: null },
-  referrals: [{ type: String }],
-  referralCount: { type: Number, default: 0 },
-  referralBonus: { type: Number, default: 0 },
+  referralCode: { type: DataTypes.STRING, unique: true },
+  referredBy: { type: DataTypes.STRING, defaultValue: null },
+  referrals: { type: DataTypes.JSONB, defaultValue: [] },
+  referralCount: { type: DataTypes.INTEGER, defaultValue: 0 },
+  referralBonus: { type: DataTypes.FLOAT, defaultValue: 0 },
   
   // Ежедневные бонусы
-  dailyBonusStreak: { type: Number, default: 0 },
-  lastDailyBonus: { type: Date, default: null },
+  dailyBonusStreak: { type: DataTypes.INTEGER, defaultValue: 0 },
+  lastDailyBonus: { type: DataTypes.DATE, defaultValue: null },
   
   // Задания и промокоды
-  completedTasks: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Task' }],
-  usedPromoCodes: [{ type: String }],
+  completedTasks: { type: DataTypes.JSONB, defaultValue: [] },
+  usedPromoCodes: { type: DataTypes.JSONB, defaultValue: [] },
   
   // Комбо
-  comboActiveUntil: { type: Date, default: null },
-  comboMultiplier: { type: Number, default: 1 },
+  comboActiveUntil: { type: DataTypes.DATE, defaultValue: null },
+  comboMultiplier: { type: DataTypes.FLOAT, defaultValue: 1 },
   
-  // Системные поля
-  lastOnline: { type: Date, default: Date.now },
-  isAdmin: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
+  // Системные
+  lastOnline: { type: DataTypes.DATE, defaultValue: Date.now },
+  isAdmin: { type: DataTypes.BOOLEAN, defaultValue: false },
+  createdAt: { type: DataTypes.DATE, defaultValue: Date.now }
+}, {
+  tableName: 'users',
+  timestamps: false
 });
 
 // Генерация реферального кода
-userSchema.pre('save', function(next) {
-  if (!this.referralCode) {
-    this.referralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+User.beforeCreate(async (user) => {
+  if (!user.referralCode) {
+    user.referralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
   }
-  next();
 });
 
-// Обновление уровня
-userSchema.methods.updateLevel = function() {
-  const newLevel = Math.floor(this.totalEarned / constants.LEVEL_UP_BASE) + 1;
+// Метод обновления уровня
+User.prototype.updateLevel = function() {
+  const newLevel = Math.floor(this.totalEarned / 10000) + 1;
   if (newLevel > this.level) {
     this.level = newLevel;
     return true;
@@ -76,39 +86,17 @@ userSchema.methods.updateLevel = function() {
   return false;
 };
 
-// Восстановление энергии
-userSchema.methods.regenEnergy = function() {
+// Метод восстановления энергии
+User.prototype.regenEnergy = function() {
   const now = Date.now();
-  const secondsPassed = (now - this.lastEnergyUpdate) / 1000;
-  const regenRate = 1 / constants.ENERGY_REGEN_TIME;
-  const bonusRegen = this.upgrades.energyRegen * 0.05;
+  const secondsPassed = (now - new Date(this.lastEnergyUpdate).getTime()) / 1000;
+  const regenRate = 1 / 30;
+  const bonusRegen = (this.upgrades.energyRegen || 0) * 0.05;
   const totalRegen = regenRate + bonusRegen;
   const newEnergy = Math.min(this.maxEnergy, this.energy + secondsPassed * totalRegen);
   this.energy = newEnergy;
-  this.lastEnergyUpdate = now;
+  this.lastEnergyUpdate = new Date(now);
   return this.energy;
 };
 
-// Расчёт пассивного дохода
-userSchema.methods.calculatePassiveIncome = function() {
-  let income = 0;
-  // Базовый доход от карточек
-  if (this.cards) {
-    this.cards.forEach((level, cardId) => {
-      // Доход рассчитывается в контроллере
-    });
-  }
-  // Доход от автокликера
-  income += this.upgrades.autoClicker * 0.5;
-  // Доход от банановой фермы
-  income += this.upgrades.bananaFarm * 1;
-  // Бонус от рефералов
-  income *= (1 + this.referralBonus / 100);
-  // Бонус от комбо
-  if (this.comboActiveUntil && new Date() < this.comboActiveUntil) {
-    income *= this.comboMultiplier;
-  }
-  return income;
-};
-
-module.exports = mongoose.model('User', userSchema);
+module.exports = User;

@@ -1,6 +1,5 @@
 const rateLimit = require('express-rate-limit');
 
-// Лимит кликов: 300 в минуту
 const clickLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 300,
@@ -8,7 +7,6 @@ const clickLimiter = rateLimit({
   skipSuccessfulRequests: true
 });
 
-// Лимит API запросов: 100 в минуту
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,

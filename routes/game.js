@@ -1,63 +1,48 @@
 const express = require('express');
 const router = express.Router();
+const { Op } = require('sequelize');
 const User = require('../models/User');
-const Card = require('../models/Card');
 const Task = require('../models/Task');
 const PromoCode = require('../models/PromoCode');
-const Combo = require('../models/Combo');
 const { clickLimiter } = require('../middleware/rateLimit');
-const { validateTelegramId } = require('../middleware/validation');
-const { calculateUpgradePrice, calculatePassiveIncome } = require('../utils/calculations');
 const constants = require('../config/constants');
-const cardsConfig = require('../config/cards');
 
 // ========== ИНИЦИАЛИЗАЦИЯ ==========
-router.post('/init', validateTelegramId, async (req, res) => {
+router.post('/init', async (req, res) => {
   try {
     const { telegramId, username, firstName, lastName, photoUrl, referredBy } = req.body;
     
-    let user = await User.findOne({ telegramId });
+    let user = await User.findOne({ where: { telegramId } });
     
     if (!user) {
-      // Создание нового пользователя
-      user = new User({ 
-        telegramId, 
-        username: username || '', 
+      user = await User.create({
+        telegramId,
+        username: username || '',
         firstName: firstName || '',
         lastName: lastName || '',
         photoUrl: photoUrl || ''
       });
       
-      // Инициализация карточек (все на 0 уровне)
-      const cards = await Card.find();
-      cards.forEach(card => {
-        user.cards.set(card.cardId, 0);
-      });
-      
-      await user.save();
-      
       // Реферальная система
       if (referredBy && referredBy !== telegramId) {
-        const referrer = await User.findOne({ telegramId: referredBy });
+        const referrer = await User.findOne({ where: { telegramId: referredBy } });
         if (referrer) {
           const reward = parseInt(process.env.REFERRAL_REWARD) || 5000;
           referrer.bananas += reward;
           referrer.totalEarned += reward;
           referrer.referralCount += 1;
-          referrer.referrals.push(telegramId);
+          referrer.referrals = [...referrer.referrals, telegramId];
           referrer.referralBonus += constants.REFERRAL_BONUS_PERCENT;
           await referrer.save();
           
-          // Награда новому пользователю
           user.bananas += Math.floor(reward / 2);
           await user.save();
         }
       }
     } else {
       // Офлайн доход
-      const secondsOffline = Math.floor((Date.now() - user.lastOnline) / 1000);
-      const cards = await Card.find();
-      const passiveIncome = calculatePassiveIncome(user, cards);
+      const secondsOffline = Math.floor((Date.now() - new Date(user.lastOnline).getTime()) / 1000);
+      const passiveIncome = user.upgrades.autoClicker * 0.5 + user.upgrades.bananaFarm * 1;
       const offlineEarnings = Math.min(secondsOffline, constants.OFFLINE_MAX_HOURS * 3600) * passiveIncome;
       
       if (offlineEarnings > 0) {
@@ -65,10 +50,8 @@ router.post('/init', validateTelegramId, async (req, res) => {
         user.totalEarned += offlineEarnings;
       }
       
-      // Восстановление энергии
       user.regenEnergy();
-      
-      user.lastOnline = Date.now();
+      user.lastOnline = new Date();
       user.username = username || user.username;
       user.firstName = firstName || user.firstName;
       user.lastName = lastName || user.lastName;
@@ -84,56 +67,44 @@ router.post('/init', validateTelegramId, async (req, res) => {
 });
 
 // ========== КЛИК ==========
-router.post('/click', clickLimiter, validateTelegramId, async (req, res) => {
+router.post('/click', clickLimiter, async (req, res) => {
   try {
     const { telegramId } = req.body;
-    let user = await User.findOne({ telegramId });
+    let user = await User.findOne({ where: { telegramId } });
     if (!user) return res.status(404).json({ error: 'User not found' });
     
-    // Восстановление энергии
     user.regenEnergy();
     
-    // Проверка энергии
     if (user.energy < constants.ENERGY_PER_CLICK) {
       await user.save();
-      return res.json({ 
-        success: false, 
-        error: 'Not enough energy!', 
+      return res.json({
+        success: false,
+        error: 'Not enough energy!',
         energy: user.energy,
-        maxEnergy: user.maxEnergy 
+        maxEnergy: user.maxEnergy
       });
     }
     
-    // Расчёт награды
-    let reward = 1 + user.upgrades.clickPower;
+    let reward = 1 + (user.upgrades.clickPower || 0);
     
-    // Критический удар
-    const critChance = user.upgrades.critical * 3;
+    const critChance = (user.upgrades.critical || 0) * 3;
     const isCritical = Math.random() * 100 < critChance;
-    if (isCritical) {
-      reward *= 5;
-    }
+    if (isCritical) reward *= 5;
     
-    // Бонус от уровня престижа
-    if (user.prestige > 0) {
-      reward *= Math.pow(2, user.prestige);
-    }
+    if (user.prestige > 0) reward *= Math.pow(2, user.prestige);
     
-    // Тратим энергию
     user.energy -= constants.ENERGY_PER_CLICK;
     user.bananas += reward;
     user.totalEarned += reward;
-    
-    // Обновление уровня
     const leveledUp = user.updateLevel();
     
     await user.save();
     
-    res.json({ 
-      success: true, 
-      reward, 
+    res.json({
+      success: true,
+      reward,
       isCritical,
-      balance: user.bananas, 
+      balance: user.bananas,
       energy: user.energy,
       maxEnergy: user.maxEnergy,
       level: user.level,
@@ -148,14 +119,13 @@ router.post('/click', clickLimiter, validateTelegramId, async (req, res) => {
 // ========== ПОЛУЧИТЬ ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ==========
 router.get('/user/:telegramId', async (req, res) => {
   try {
-    const user = await User.findOne({ telegramId: req.params.telegramId });
+    const user = await User.findOne({ where: { telegramId: req.params.telegramId } });
     if (!user) return res.status(404).json({ error: 'User not found' });
     
     user.regenEnergy();
     await user.save();
     
-    const cards = await Card.find();
-    const passiveIncome = calculatePassiveIncome(user, cards);
+    const passiveIncome = (user.upgrades.autoClicker || 0) * 0.5 + (user.upgrades.bananaFarm || 0) * 1;
     
     res.json({
       bananas: user.bananas,
@@ -164,37 +134,44 @@ router.get('/user/:telegramId', async (req, res) => {
       prestige: user.prestige,
       energy: user.energy,
       maxEnergy: user.maxEnergy,
-      passiveIncome: passiveIncome,
+      passiveIncome,
       upgrades: user.upgrades,
-      cards: Object.fromEntries(user.cards),
+      cards: user.cards,
       referralCode: user.referralCode,
       referralCount: user.referralCount,
       referralBonus: user.referralBonus,
       dailyBonusStreak: user.dailyBonusStreak,
-      comboActive: user.comboActiveUntil && new Date() < user.comboActiveUntil
+      comboActive: user.comboActiveUntil && new Date() < new Date(user.comboActiveUntil)
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ========== ПОКУПКА КАРТОЧКИ ==========
-router.post('/buy-card', validateTelegramId, async (req, res) => {
+// ========== ПОКУПКА УЛУЧШЕНИЯ ==========
+router.post('/buy-upgrade', async (req, res) => {
   try {
-    const { telegramId, cardId } = req.body;
-    const user = await User.findOne({ telegramId });
-    const card = await Card.findOne({ cardId });
+    const { telegramId, upgradeId } = req.body;
+    const user = await User.findOne({ where: { telegramId } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
     
-    if (!user || !card) return res.status(404).json({ error: 'Not found' });
+    const prices = {
+      clickPower: 100,
+      autoClicker: 500,
+      energy: 300,
+      energyRegen: 400,
+      critical: 600,
+      bananaFarm: 800,
+      minionHelper: 1000
+    };
     
-    const currentLevel = user.cards.get(cardId) || 0;
-    if (currentLevel >= card.maxLevel) {
+    const currentLevel = user.upgrades[upgradeId] || 0;
+    if (currentLevel >= 10) {
       return res.json({ success: false, message: 'Max level reached!' });
     }
     
-    // Расчёт цены с учётом скидки от миньона-помощника
-    let price = Math.floor(card.basePrice * Math.pow(card.priceMultiplier, currentLevel));
-    const discount = user.upgrades.minionHelper * 2;
+    let price = prices[upgradeId] * Math.pow(2, currentLevel);
+    const discount = (user.upgrades.minionHelper || 0) * 2;
     price = Math.floor(price * (1 - discount / 100));
     
     if (user.bananas < price) {
@@ -202,17 +179,16 @@ router.post('/buy-card', validateTelegramId, async (req, res) => {
     }
     
     user.bananas -= price;
-    user.cards.set(cardId, currentLevel + 1);
+    user.upgrades[upgradeId] = currentLevel + 1;
     
-    // Эффекты от карточек
-    if (cardId === 'energy_cell') {
-      user.maxEnergy += 10;
+    if (upgradeId === 'energy') {
+      user.maxEnergy = 500 + (user.upgrades.energy * 10);
     }
     
     await user.save();
     
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       newLevel: currentLevel + 1,
       balance: user.bananas,
       maxEnergy: user.maxEnergy
@@ -222,20 +198,10 @@ router.post('/buy-card', validateTelegramId, async (req, res) => {
   }
 });
 
-// ========== ПОЛУЧИТЬ КАРТОЧКИ ==========
-router.get('/cards', async (req, res) => {
-  try {
-    const cards = await Card.find().sort({ order: 1 });
-    res.json(cards);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ========== РЕФЕРАЛЬНАЯ ССЫЛКА ==========
 router.get('/referral/:telegramId', async (req, res) => {
   try {
-    const user = await User.findOne({ telegramId: req.params.telegramId });
+    const user = await User.findOne({ where: { telegramId: req.params.telegramId } });
     if (!user) return res.status(404).json({ error: 'User not found' });
     
     const botUsername = process.env.BOT_USERNAME;
@@ -248,23 +214,23 @@ router.get('/referral/:telegramId', async (req, res) => {
 });
 
 // ========== ЕЖЕДНЕВНЫЙ БОНУС ==========
-router.post('/daily-bonus', validateTelegramId, async (req, res) => {
+router.post('/daily-bonus', async (req, res) => {
   try {
     const { telegramId } = req.body;
-    const user = await User.findOne({ telegramId });
+    const user = await User.findOne({ where: { telegramId } });
     if (!user) return res.status(404).json({ error: 'User not found' });
     
     const now = new Date();
     const lastBonus = user.lastDailyBonus;
     const bonuses = process.env.DAILY_BONUSES.split(',').map(Number);
     
-    if (lastBonus && now - lastBonus < 24 * 60 * 60 * 1000) {
-      const hoursLeft = 24 - Math.floor((now - lastBonus) / (60 * 60 * 1000));
+    if (lastBonus && now - new Date(lastBonus) < 24 * 60 * 60 * 1000) {
+      const hoursLeft = 24 - Math.floor((now - new Date(lastBonus)) / (60 * 60 * 1000));
       return res.json({ success: false, message: `Next bonus in ${hoursLeft} hours` });
     }
     
     let streak = user.dailyBonusStreak;
-    if (lastBonus && now - lastBonus < 48 * 60 * 60 * 1000) {
+    if (lastBonus && now - new Date(lastBonus) < 48 * 60 * 60 * 1000) {
       streak = Math.min(streak + 1, 6);
     } else {
       streak = 0;
@@ -277,54 +243,12 @@ router.post('/daily-bonus', validateTelegramId, async (req, res) => {
     user.lastDailyBonus = now;
     await user.save();
     
-    res.json({ 
-      success: true, 
-      reward, 
-      streak: streak + 1, 
-      nextBonus: bonuses[streak + 1] || bonuses[6] 
+    res.json({
+      success: true,
+      reward,
+      streak: streak + 1,
+      nextBonus: bonuses[streak + 1] || bonuses[6]
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ========== ПРЕСТИЖ ==========
-router.post('/prestige', validateTelegramId, async (req, res) => {
-  try {
-    const { telegramId } = req.body;
-    const user = await User.findOne({ telegramId });
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    
-    if (user.level < constants.PRESTIGE_LEVEL) {
-      return res.json({ success: false, message: `Need level ${constants.PRESTIGE_LEVEL} for prestige!` });
-    }
-    
-    // Сброс прогресса
-    user.prestige += 1;
-    user.level = 1;
-    user.bananas = 0;
-    user.upgrades = {
-      clickPower: 0,
-      autoClicker: 0,
-      energy: 0,
-      energyRegen: 0,
-      critical: 0,
-      bananaFarm: 0,
-      minionHelper: 0
-    };
-    
-    // Сброс карточек
-    const cards = await Card.find();
-    cards.forEach(card => {
-      user.cards.set(card.cardId, 0);
-    });
-    
-    user.maxEnergy = constants.MAX_ENERGY;
-    user.energy = constants.MAX_ENERGY;
-    
-    await user.save();
-    
-    res.json({ success: true, prestige: user.prestige, bonus: Math.pow(2, user.prestige) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -333,11 +257,11 @@ router.post('/prestige', validateTelegramId, async (req, res) => {
 // ========== ТАБЛИЦА ЛИДЕРОВ ==========
 router.get('/leaderboard', async (req, res) => {
   try {
-    const leaders = await User.find()
-      .sort({ totalEarned: -1 })
-      .limit(100)
-      .select('firstName username photoUrl totalEarned level prestige referralCount');
-    
+    const leaders = await User.findAll({
+      order: [['totalEarned', 'DESC']],
+      limit: 100,
+      attributes: ['firstName', 'username', 'photoUrl', 'totalEarned', 'level', 'prestige', 'referralCount']
+    });
     res.json(leaders);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -347,29 +271,28 @@ router.get('/leaderboard', async (req, res) => {
 // ========== ЗАДАНИЯ ==========
 router.get('/tasks', async (req, res) => {
   try {
-    const tasks = await Task.find({ isActive: true }).sort({ order: 1 });
+    const tasks = await Task.findAll({ where: { isActive: true }, order: [['order', 'ASC']] });
     res.json(tasks);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/check-task', validateTelegramId, async (req, res) => {
+router.post('/check-task', async (req, res) => {
   try {
     const { telegramId, taskId } = req.body;
-    const user = await User.findOne({ telegramId });
-    const task = await Task.findById(taskId);
+    const user = await User.findOne({ where: { telegramId } });
+    const task = await Task.findOne({ where: { id: taskId } });
     
     if (!user || !task) return res.status(404).json({ error: 'Not found' });
     if (user.completedTasks.includes(taskId)) {
       return res.json({ success: false, message: 'Already completed!' });
     }
     
-    // В режиме разработки автоматически засчитываем
     if (process.env.NODE_ENV === 'development') {
       user.bananas += task.reward;
       user.totalEarned += task.reward;
-      user.completedTasks.push(taskId);
+      user.completedTasks = [...user.completedTasks, taskId];
       await user.save();
       return res.json({ success: true, reward: task.reward, balance: user.bananas });
     }
@@ -381,11 +304,20 @@ router.post('/check-task', validateTelegramId, async (req, res) => {
 });
 
 // ========== ПРОМОКОДЫ ==========
-router.post('/activate-promo', validateTelegramId, async (req, res) => {
+router.post('/activate-promo', async (req, res) => {
   try {
     const { telegramId, code } = req.body;
-    const user = await User.findOne({ telegramId });
-    const promo = await PromoCode.findOne({ code: code.toUpperCase(), isActive: true });
+    const user = await User.findOne({ where: { telegramId } });
+    const promo = await PromoCode.findOne({
+      where: {
+        code: code.toUpperCase(),
+        isActive: true,
+        [Op.or]: [
+          { expiresAt: null },
+          { expiresAt: { [Op.gt]: new Date() } }
+        ]
+      }
+    });
     
     if (!user || !promo) return res.json({ success: false, message: 'Invalid promo code!' });
     if (user.usedPromoCodes.includes(promo.code)) {
@@ -394,50 +326,15 @@ router.post('/activate-promo', validateTelegramId, async (req, res) => {
     if (promo.maxUses && promo.usedCount >= promo.maxUses) {
       return res.json({ success: false, message: 'Promo code expired!' });
     }
-    if (promo.expiresAt && new Date() > promo.expiresAt) {
-      return res.json({ success: false, message: 'Promo code expired!' });
-    }
     
     user.bananas += promo.reward;
     user.totalEarned += promo.reward;
-    user.usedPromoCodes.push(promo.code);
+    user.usedPromoCodes = [...user.usedPromoCodes, promo.code];
     promo.usedCount += 1;
     await user.save();
     await promo.save();
     
     res.json({ success: true, reward: promo.reward, balance: user.bananas });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ========== КОМБО ДНЯ ==========
-router.get('/combo/:telegramId', async (req, res) => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const combo = await Combo.findOne({ date: today, isActive: true });
-    
-    if (!combo) {
-      return res.json({ success: false, message: 'No combo today!' });
-    }
-    
-    const user = await User.findOne({ telegramId: req.params.telegramId });
-    let hasCombo = false;
-    
-    if (user) {
-      const userCards = user.cards;
-      hasCombo = combo.cardIds.every(cardId => (userCards.get(cardId) || 0) > 0);
-      
-      if (hasCombo && (!user.comboActiveUntil || new Date() > user.comboActiveUntil)) {
-        const activeUntil = new Date();
-        activeUntil.setHours(activeUntil.getHours() + constants.COMBO_DURATION_HOURS);
-        user.comboActiveUntil = activeUntil;
-        user.comboMultiplier = combo.bonusMultiplier;
-        await user.save();
-      }
-    }
-    
-    res.json({ combo: combo.cardIds, hasCombo, bonusMultiplier: combo.bonusMultiplier });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -3,7 +3,7 @@ const User = require('../models/User');
 const isAdmin = async (telegramId) => {
   const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',') : [];
   if (adminIds.includes(telegramId)) return true;
-  const user = await User.findOne({ telegramId });
+  const user = await User.findOne({ where: { telegramId } });
   return user?.isAdmin || false;
 };
 
