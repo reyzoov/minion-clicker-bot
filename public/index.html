@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Minion Clicker | Кликер Миньонов</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Шапка -->
+    <div class="header">
+      <div class="user-info">
+        <div class="avatar" id="avatar">🐤</div>
+        <div class="level-info">
+          <span class="level-label">Уровень</span>
+          <span class="level-value" id="level">1</span>
+        </div>
+      </div>
+      <div class="balance-card">
+        <div class="balance-icon">🍌</div>
+        <div class="balance-value" id="balance">0</div>
+      </div>
+    </div>
+
+    <!-- Энергия -->
+    <div class="energy-container">
+      <div class="energy-label">
+        <span>⚡ Энергия</span>
+        <span id="energyText">500/500</span>
+      </div>
+      <div class="energy-bar">
+        <div class="energy-fill" id="energyFill"></div>
+      </div>
+    </div>
+
+    <!-- Пассивный доход -->
+    <div class="passive-card">
+      <span>🤖 Пассивный доход:</span>
+      <strong id="passiveIncome">0</strong>
+      <span>🍌/сек</span>
+    </div>
+
+    <!-- Кликабельный банан -->
+    <div class="click-area" id="clickArea">
+      <div class="banana" id="banana">
+        <div class="banana-shadow"></div>
+        <div class="banana-emoji">🍌</div>
+      </div>
+    </div>
+
+    <!-- Кнопка ежедневного бонуса -->
+    <button class="daily-bonus-btn" id="dailyBonusBtn">
+      🎁 Ежедневный бонус
+    </button>
+
+    <!-- Табы -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="clicker">
+        <span>🍌</span>
+        <span>Кликер</span>
+      </button>
+      <button class="tab-btn" data-tab="cards">
+        <span>🃏</span>
+        <span>Карты</span>
+      </button>
+      <button class="tab-btn" data-tab="tasks">
+        <span>📋</span>
+        <span>Задания</span>
+      </button>
+      <button class="tab-btn" data-tab="friends">
+        <span>👥</span>
+        <span>Друзья</span>
+      </button>
+      <button class="tab-btn" data-tab="leaderboard">
+        <span>🏆</span>
+        <span>Топ</span>
+      </button>
+    </div>
+
+    <!-- Контент табов -->
+    <div class="tabs-content">
+      <div id="clickerTab" class="tab-content active">
+        <div class="info-card">
+          <h3>🐤 Миньон-кликер</h3>
+          <p>Жми на банан! Каждый клик приносит бананы.</p>
+          <hr>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span>💪 Сила клика:</span>
+              <strong id="clickPower">+1</strong>
+            </div>
+            <div class="stat-item">
+              <span>⭐ Критический шанс:</span>
+              <strong id="critChance">0%</strong>
+            </div>
+            <div class="stat-item">
+              <span>🎖️ Престиж:</span>
+              <strong id="prestige">0</strong>
+            </div>
+            <div class="stat-item">
+              <span>🍌 Всего собрано:</span>
+              <strong id="totalEarned">0</strong>
+            </div>
+          </div>
+          <button class="prestige-btn" id="prestigeBtn">🔄 ПРЕСТИЖ (x2)</button>
+        </div>
+      </div>
+
+      <div id="cardsTab" class="tab-content">
+        <div class="cards-grid" id="cardsList"></div>
+      </div>
+
+      <div id="tasksTab" class="tab-content">
+        <div class="tasks-list" id="tasksList"></div>
+      </div>
+
+      <div id="friendsTab" class="tab-content">
+        <div class="referral-card">
+          <h3>👥 Пригласи друзей!</h3>
+          <p>За каждого друга ты получишь <strong>5,000 🍌 + 1% к доходу</strong></p>
+          <div class="referral-stats">
+            <span>👥 Друзей: <strong id="referralCount">0</strong></span>
+            <span>📈 Бонус: +<strong id="referralBonus">0</strong>%</span>
+          </div>
+          <div class="referral-link" id="referralLink">Загрузка...</div>
+          <button class="copy-btn" id="copyReferralBtn">📋 Копировать ссылку</button>
+        </div>
+      </div>
+
+      <div id="leaderboardTab" class="tab-content">
+        <div class="leaderboard-list" id="leaderboardList"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
